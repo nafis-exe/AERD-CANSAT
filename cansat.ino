@@ -1,4 +1,3 @@
-// Include necessary libraries
 #include <Wire.h>
 #include <MPU6050.h>
 #include <SD.h>
@@ -36,6 +35,11 @@ File dataFile;
 
 // Define phone number for SMS notifications
 String phoneNumber = "1234567890";
+
+// Define variables for GPS data
+float latitude = 0.0;
+float longitude = 0.0;
+float velocity = 0.0;
 
 void setup() {
     // Initialize serial communication
@@ -81,6 +85,11 @@ void setup() {
     sendATCommand("AT"); // Check if module is responsive
     sendATCommand("AT+CMGF=1"); // Set SMS mode to text mode
 
+    // Initialize LoRa module
+    pinMode(LORA_RX_PIN, INPUT);
+    pinMode(LORA_TX_PIN, OUTPUT);
+    lora.begin(9600);
+
     // Initialize camera control pin
     pinMode(CAMERA_CONTROL_PIN, OUTPUT);
 }
@@ -111,7 +120,89 @@ void loop() {
 // Function to read sensor data and perform telemetry transmission
 void readAndTransmitSensorData() {
     // Read sensor data
-    float temperature =
+    float temperature = readTemperature();
+    float humidity = readHumidity();
+    float pressure = readPressure();
+    float altitude = readAltitude();
+    float voltage = readVoltage();
+    float current = readCurrent();
+    int uvIndex = readUVIndex();
+    long timestamp = getUnixTimestamp(); // Get Unix timestamp
+
+    // Format telemetry data
+    String telemetryData = "Temperature: " + String(temperature) + "C, "
+                         + "Humidity: " + String(humidity) + "%, "
+                         + "Pressure: " + String(pressure) + "hPa, "
+                         + "Altitude: " + String(altitude) + "m, "
+                         + "Voltage: " + String(voltage) + "V, "
+                         + "Current: " + String(current) + "A, "
+                         + "UV Index: " + String(uvIndex) + ", "
+                         + "GPS Coordinates: " + String(latitude, 6) + ", " + String(longitude, 6) + ", "
+                         + "Velocity: " + String(velocity) + " km/h, "
+                         + "Timestamp: " + String(timestamp);
+
+    // Log telemetry data to SD card
+    logData(telemetryData);
+
+    // Send telemetry data via LoRa
+    sendDataViaLoRa(telemetryData);
+}
+
+// Function to read temperature from BME280 sensor
+float readTemperature() {
+    return bme.readTemperature();
+}
+
+// Function to read humidity from BME280 sensor
+float readHumidity() {
+    return bme.readHumidity();
+}
+
+// Function to read pressure from BME280 sensor
+float readPressure() {
+    return bme.readPressure();
+}
+
+// Function to calculate altitude from pressure
+float readAltitude() {
+    return bme.readAltitude(1013.25); // Sea-level pressure for calibration
+}
+
+// Function to read voltage from voltage divider
+float readVoltage() {
+    int sensorValue = analogRead(VOLTAGE_PIN);
+    float voltage = sensorValue * (5.0 / 1023.0); // Assuming 5V reference
+    return voltage;
+}
+
+// Function to read current from ACS712 sensor
+float readCurrent() {
+    int sensorValue = analogRead(ACS712_PIN);
+    // Convert analog value to current using calibration factor
+    // For example, if 512 corresponds to 0 Amps and sensor has sensitivity of 100 mV/A, calibration factor is 0.1
+    float current = (sensorValue - 512) * 0.1;
+    return current;
+}
+
+// Function to read UV index from UV sensor
+int readUVIndex() {
+    int uvIndex = analogRead(UV_SENSOR_PIN); // Read analog value from UV sensor
+    return uvIndex;
+}
+
+// Function to get Unix timestamp
+long getUnixTimestamp() {
+    return rtc.getUnixTime();
+}
+
+// Function to update GPS data
+void updateGPSData() {
+    // Read and parse GPS data
+    String data = sim808GPS.readStringUntil('\n');
+    char dataCharArray[data.length() + 1];
+    strcpy(dataCharArray, data.c_str());
+
+    // Tokenize data
     char *token = strtok(dataCharArray, ",");
     int index = 0;
 
@@ -130,3 +221,67 @@ void readAndTransmitSensorData() {
         index++;
     }
 }
+
+// Function to update LED status based on system state
+void updateLEDStatus() {
+
+}
+
+// Function to send SMS using SIM808 module
+void sendSMS(String message) {
+    sendATCommand("AT+CMGS=\"" + phoneNumber + "\""); // Set recipient number
+    sim808.print(message); // Send message
+    sim808.write(26); // Send Ctrl+Z to terminate message
+    delay(1000); // Wait for message to be sent
+    while (sim808.available()) {
+        Serial.write(sim808.read());
+    }
+}
+
+// Function to log data to SD card
+void logData(String data) {
+    dataFile = SD.open("data.txt", FILE_WRITE);
+    if (dataFile) {
+        dataFile.println(data);
+        dataFile.close();
+        digitalWrite(LED_SD_PIN, HIGH); // Turn on SD card write LED
+        delay(1000); // Keep LED on for 1 second
+        digitalWrite(LED_SD_PIN, LOW); // Turn off SD card write LED
+    } else {
+        Serial.println("Error opening file for writing");
+    }
+}
+
+// Function to send data via LoRa
+void sendDataViaLoRa(String data) {
+    // Add LoRa transmission code here
+}
+
+// Function to control camera module start
+void startCamera() {
+  
+}
+
+// Function to control camera module stop
+void stopCamera() {
+}
+
+// Function to blink error LED
+void blinkError() {
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(LED_ERROR_PIN, HIGH);
+        delay(500);
+        digitalWrite(LED_ERROR_PIN, LOW);
+        delay(500);
+    }
+}
+
+// Function to send AT command to SIM808 module
+void sendATCommand(String command) {
+    sim808.println(command);
+    delay(1000);
+    while (sim808.available()) {
+        Serial.write(sim808.read());
+    }
+}
+
