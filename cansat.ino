@@ -1,3 +1,4 @@
+// Include necessary libraries
 #include <Wire.h>
 #include <MPU6050.h>
 #include <SD.h>
@@ -5,6 +6,7 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <DS3231.h> // RTC library
+#include <SoftwareSerial.h> // Software serial library for SIM808 GPS module
 
 // Define sensor pins and addresses
 #define MPU_ADDR 0x68 // MPU6050 address
@@ -25,9 +27,9 @@
 // Define sensor objects
 MPU6050 mpu(Wire);
 HardwareSerial sim808(2); // Using hardware serial port 2 for SIM808 module
-HardwareSerial lora(1); // Using hardware serial port 1 for LoRa module
 Adafruit_BME280 bme;
 DS3231 rtc(21, 22); // SDA, SCL for I2C communication (GPIO21, GPIO22)
+SoftwareSerial sim808GPS(SIM808_RX_PIN, SIM808_TX_PIN); // Software serial for SIM808 GPS module
 
 // Define file object for SD card
 File dataFile;
@@ -73,13 +75,11 @@ void setup() {
 
     // Initialize SIM808 module
     sim808.begin(9600, SERIAL_8N1, SIM808_RX_PIN, SIM808_TX_PIN);
+    sim808GPS.begin(9600); // Start serial communication with SIM808 GPS module
     rtc.begin();
 
     sendATCommand("AT"); // Check if module is responsive
     sendATCommand("AT+CMGF=1"); // Set SMS mode to text mode
-
-    // Initialize LoRa module
-    lora.begin(9600, SERIAL_8N1, LORA_RX_PIN, LORA_TX_PIN);
 
     // Initialize camera control pin
     pinMode(CAMERA_CONTROL_PIN, OUTPUT);
@@ -98,6 +98,14 @@ void loop() {
             stopCamera();
         }
     }
+
+    // Update GPS data
+    while (sim808GPS.available() > 0) {
+        if (sim808GPS.find("$GPRMC")) {
+            // Process GPS data
+            updateGPSData();
+        }
+    }
 }
 
 // Function to read sensor data and perform telemetry transmission
@@ -110,6 +118,7 @@ void readAndTransmitSensorData() {
     float voltage = readVoltage();
     float current = readCurrent();
     int uvIndex = readUVIndex();
+    long timestamp = getUnixTimestamp(); // Get Unix timestamp
 
     // Format telemetry data
     String telemetryData = "Temperature: " + String(temperature) + "C, "
@@ -118,7 +127,10 @@ void readAndTransmitSensorData() {
                          + "Altitude: " + String(altitude) + "m, "
                          + "Voltage: " + String(voltage) + "V, "
                          + "Current: " + String(current) + "A, "
-                         + "UV Index: " + String(uvIndex);
+                         + "UV Index: " + String(uvIndex) + ", "
+                         + "GPS Coordinates: " + String(latitude, 6) + ", " + String(longitude, 6) + ", "
+                         + "Velocity: " + String(velocity) + " km/h, "
+                         + "Timestamp: " + String(timestamp);
 
     // Log telemetry data to SD card
     logData(telemetryData);
@@ -171,11 +183,14 @@ int readUVIndex() {
     return uvIndex;
 }
 
+// Function to get Unix timestamp
+long getUnixTimestamp() {
+    return rtc.getUnixTime();
+}
+
 // Function to update LED status based on system state
 void updateLEDStatus() {
-    digitalWrite(LED_GPS_PIN, HIGH); // Turn on GPS LED
-    digitalWrite(LED_SD_PIN, HIGH); // Turn on SD card LED
-    digitalWrite(LED_ERROR_PIN, LOW); // Turn off error LED
+    // Add code to update LED status
 }
 
 // Function to send SMS using SIM808 module
@@ -205,18 +220,17 @@ void logData(String data) {
 
 // Function to send data via LoRa
 void sendDataViaLoRa(String data) {
-    lora.print(data);
-    delay(1000); // Adjust delay as needed for LoRa transmission
+    // Add LoRa transmission code here
 }
 
 // Function to control camera module start
 void startCamera() {
-    digitalWrite(CAMERA_CONTROL_PIN, HIGH);
+    // Add camera start code here
 }
 
 // Function to control camera module stop
 void stopCamera() {
-    digitalWrite(CAMERA_CONTROL_PIN, LOW);
+    // Add camera stop code here
 }
 
 // Function to blink error LED
@@ -235,5 +249,37 @@ void sendATCommand(String command) {
     delay(1000);
     while (sim808.available()) {
         Serial.write(sim808.read());
+    }
+}
+
+// Variables to store GPS data
+float latitude = 0.0;
+float longitude = 0.0;
+float velocity = 0.0;
+
+// Function to update GPS data
+void updateGPSData() {
+    // Read and parse GPS data
+    String data = sim808GPS.readStringUntil('\n');
+    char dataCharArray[data.length() + 1];
+    strcpy(dataCharArray, data.c_str());
+
+    // Tokenize data
+    char *token = strtok(dataCharArray, ",");
+    int index = 0;
+
+    while (token != NULL) {
+        if (index == 3) {
+            // Latitude
+            latitude = atof(token);
+        } else if (index == 5) {
+            // Longitude
+            longitude = atof(token);
+        } else if (index == 7) {
+            // Velocity
+            velocity = atof(token);
+        }
+        token = strtok(NULL, ",");
+        index++;
     }
 }
